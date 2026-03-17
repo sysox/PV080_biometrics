@@ -1,0 +1,9 @@
+notebook
+nbclassic
+jupyter
+ipykernel
+numpy
+opencv-python
+matplotlib
+scikit-image
+scipy
