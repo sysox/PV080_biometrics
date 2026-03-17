@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 
 
 @dataclass
@@ -56,19 +56,19 @@ class PipelineParams:
     # ------------------------------------------------------------
     # DoG / FFT
     # ------------------------------------------------------------
-    use_dog: bool = False
+    # "dog", "fft", "gabor", "ced", "none"
+    enhancement_method: Literal["none", "dog", "fft", "gabor", "ced"] = "none"
+
     dog_sigma1: float = 1.0
     dog_sigma2: float = 2.0
     dog_gain: float = 1.0
 
-    use_fft_bandpass: bool = False
     fft_low_sigma: float = 3.0
     fft_high_sigma: float = 25.0
 
     # ------------------------------------------------------------
     # GABOR
     # ------------------------------------------------------------
-    use_gabor: bool = False
     use_dynamic_gabor: bool = False
 
     gabor_sigma: float = 3.0
@@ -88,7 +88,6 @@ class PipelineParams:
     # ------------------------------------------------------------
     # CED (Coherence Enhancing Diffusion)
     # ------------------------------------------------------------
-    use_ced: bool = False
     ced_lambda: float = 0.2
     ced_sigma: float = 1.0
     ced_rho: float = 3.0
@@ -99,18 +98,17 @@ class PipelineParams:
     # ------------------------------------------------------------
     # RIDGE FILTER
     # ------------------------------------------------------------
-    ridge_filter: str = "none"
+    ridge_filter: Literal["none", "frangi", "sato", "meijering", "hessian"] = "none"
     ridge_sigmas: Tuple[float, ...] = (1.0, 2.0, 3.0)
     black_ridges: bool = False
 
     # ------------------------------------------------------------
     # BINARIZATION
     # ------------------------------------------------------------
-    bin_method: str = "adaptive"
+    bin_method: Literal["adaptive", "otsu", "sauvola", "niblack", "fixed"] = "adaptive"
     bin_block: int = 15
     bin_C: int = 3
     bin_thresh: int = 127
-    bin_window_size: int = 15
     bin_k: float = 0.2
 
     # detector-specific extras
@@ -151,3 +149,16 @@ class PipelineParams:
 
     minutiae_max_spur_len: int = 15
     minutiae_suppress_dist: int = 12
+
+    def __post_init__(self):
+        """
+        Validates and corrects parameters after initialization.
+        Ensures kernel sizes are odd for OpenCV compatibility.
+        """
+        # Ensure kernel sizes are odd numbers
+        for attr in ['roi_block', 'mask_blur_k', 'mask_block', 'mask_open_k',
+                     'mask_close_k', 'blur_k', 'gabor_kernel', 'orient_block',
+                     'bin_block', 'close_k', 'open_k']:
+            val = getattr(self, attr)
+            if val is not None and val > 0 and val % 2 == 0:
+                setattr(self, attr, val + 1)

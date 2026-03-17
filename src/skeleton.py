@@ -133,16 +133,29 @@ def remove_short_spurs(skel: np.ndarray, spur_length: int = 8) -> np.ndarray:
     sk = skel_to_bool(skel)
     endpoints, _ = classify_skeleton_pixels(sk)
     ys, xs = np.where(endpoints > 0)
+    
+    pixels_to_remove = set()
+    
     for y, x in zip(ys, xs):
-        if sk[y, x] == 0:
-            continue
+        # We trace on the original 'sk' to avoid topology changes during the pass
         path = trace_branch_from_endpoint(sk, y, x, max_len=spur_length + 2)
         if len(path) <= spur_length:
             end = path[-1]
-            if count_neighbors(sk, end[0], end[1]) >= 3 or len(path) < spur_length:
+            n_end = count_neighbors(sk, end[0], end[1])
+            if n_end >= 3:
+                # Connected to junction. Remove spur, keep junction.
+                for py, px in path[:-1]:
+                    pixels_to_remove.add((py, px))
+            else:
+                # Isolated or endpoint-endpoint short ridge
                 for py, px in path:
-                    sk[py, px] = 0
-    return bool_to_skel(sk)
+                    pixels_to_remove.add((py, px))
+
+    out = sk.copy()
+    for py, px in pixels_to_remove:
+        out[py, px] = 0
+                    
+    return bool_to_skel(out)
 
 
 def remove_small_skeleton_components(skeleton: np.ndarray, min_size: int = 12) -> np.ndarray:

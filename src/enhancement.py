@@ -354,3 +354,31 @@ def subtract_median_ridges(gray: np.ndarray, finger_scale: float, base_radius: i
 
     # Enhance contrast like ImageJ 'saturated=0.35'
     return contrast_stretch_saturated(subtracted, saturated=0.35)
+
+
+def homomorphic_filter(img: np.ndarray, cutoff: int = 30) -> np.ndarray:
+    """Removes uneven illumination (flash hotspots)."""
+    img_log = np.log1p(img.astype(np.float32))
+    dft = np.fft.fftshift(np.fft.fft2(img_log))
+
+    rows, cols = img.shape
+    mask = np.ones((rows, cols))
+    cy, cx = rows // 2, cols // 2
+    for i in range(rows):
+        for j in range(cols):
+            dist = np.sqrt((i - cy) ** 2 + (j - cx) ** 2)
+            mask[i, j] = 1 - np.exp(-(dist ** 2) / (2 * (cutoff ** 2)))
+
+    f_filt = dft * (0.5 + mask)  # Boost highs, suppress lows
+    img_back = np.expm1(np.real(np.fft.ifft2(np.fft.ifftshift(f_filt))))
+    return cv2.normalize(img_back, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+
+def local_normalize(img: np.ndarray, block_size: int = 16):
+    """Hong-Wan-Jain normalization for uniform contrast."""
+    img = img.astype(np.float32)
+    mean = cv2.blur(img, (block_size, block_size))
+    sq_mean = cv2.blur(img ** 2, (block_size, block_size))
+    std = np.sqrt(np.maximum(sq_mean - mean ** 2, 10))
+    norm = (img - mean) / std
+    return cv2.normalize(norm, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
