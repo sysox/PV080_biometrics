@@ -141,7 +141,7 @@ def _available_operation_specs() -> Dict[str, OperationSpec]:
             key="mask_black_bg",
             name="Mask from Black Background",
             func=mask_from_black_background,
-            input_map={"img_gray": "image"},
+            input_map={"gray": "image"},
             output_keys=["mask"],
             params_spec={
                 "threshold": {"kind": "int", "value": 20, "min": 0, "max": 120, "step": 1, "label": "Thresh"},
@@ -155,7 +155,7 @@ def _available_operation_specs() -> Dict[str, OperationSpec]:
             key="foreground_mask",
             name="Foreground Mask",
             func=build_foreground_mask,
-            input_map={"img_gray": "image"},
+            input_map={"gray": "image"},
             output_keys=["mask"],
             params_spec={
                 "blur_ksize": {"kind": "int", "value": 5, "min": 1, "max": 21, "step": 2, "label": "Blur"},
