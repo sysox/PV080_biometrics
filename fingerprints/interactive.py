@@ -90,6 +90,7 @@ class Step:
         input_map: Optional[Dict[str, str]] = None,
         enabled: bool = True,
         display_key: Optional[str] = None,
+        image_scale: Optional[float] = None,
     ):
         self.name = name
         self.func = func
@@ -99,6 +100,7 @@ class Step:
         self.params = params if params else {}
         self.description = description
         self.display_key = display_key
+        self.image_scale = image_scale  # overrides pipeline-global scale when set
 
         self.enabled = enabled
         self.last_execution_time = 0.0
@@ -146,7 +148,7 @@ class Step:
         """
         Constructs the widget for this step.
         """
-        size = int(300 * image_scale)
+        size = int(300 * (self.image_scale if self.image_scale is not None else image_scale))
         self.image_widget.width = f"{size}px"
         self.image_widget.height = f"{size}px"
 
@@ -237,13 +239,24 @@ class Step:
             context[self.output_keys[0]] = result
             return result
 
-        if not isinstance(result, tuple):
+        # Handle case where multiple output keys are expected but function returns a single item
+        if not isinstance(result, tuple) and len(self.output_keys) > 1:
+            # Log a warning or raise an error, then assign to the first output key
+            print(f"Warning: Step '{self.name}' expected {len(self.output_keys)} outputs but got a single item. Assigning to '{self.output_keys[0]}'.")
+            context[self.output_keys[0]] = result
+            return result
+        
+        if not isinstance(result, tuple) and len(self.output_keys) == 1:
             context[self.output_keys[0]] = result
             return result
 
         for i, out_key in enumerate(self.output_keys):
             if i < len(result):
                 context[out_key] = result[i]
+            else:
+                # If result tuple is shorter than output_keys, fill remaining with None or warn
+                print(f"Warning: Step '{self.name}' result tuple is shorter than output_keys. '{out_key}' not assigned.")
+                context[out_key] = None # Assign None to unassigned output keys
         return result[0] if len(result) > 0 else None
 
     def _resolve_display_data(self, context: PipelineContext, primary_result: Any) -> Any:
@@ -308,6 +321,8 @@ class InteractivePipeline:
         self.preset_name = preset_name
 
         for i, step in enumerate(self.steps):
+            if step is None:
+                raise RuntimeError(f"Pipeline step at index {i} is None")
             step.parent_pipeline = self
             step.index = i
 

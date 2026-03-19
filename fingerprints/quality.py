@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import cv2
 import numpy as np
-from .frequency import estimate_ridge_frequency
 
 def estimate_image_quality(gray: np.ndarray, mask: np.ndarray | None = None, block_size: int = 32) -> float:
     """

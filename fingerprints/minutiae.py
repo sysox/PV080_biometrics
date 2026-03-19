@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from .skeleton import get_8_neighbors, skel_to_bool
@@ -284,3 +285,194 @@ def finalize_minutiae(
     for i, m in enumerate(cleaned, start=1):
         m["id"] = i
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Visualisation
+# ---------------------------------------------------------------------------
+
+# BGR colours — high saturation, easy to distinguish on any background
+_COLOR_ENDING       = (0,   0,   220)  # red (BGR)
+_COLOR_BIFURCATION  = (220,  60,   0)  # blue (BGR)
+_COLOR_OUTLINE      = (255, 255, 255)  # white outline for contrast on dark bg
+_COLOR_OUTLINE_DARK = (30,   30,  30)  # dark outline for contrast on light bg
+
+
+def _make_canvas(
+    background: Optional[np.ndarray],
+    canvas_size: Optional[Tuple[int, int]],
+) -> np.ndarray:
+    """Return a BGR canvas from a background image or a black canvas."""
+    if background is not None:
+        img = np.asarray(background)
+        if img.ndim == 2:
+            return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        if img.ndim == 3 and img.shape[2] == 4:
+            return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        return img.copy()
+
+    if canvas_size is None:
+        raise ValueError("Provide background or canvas_size=(height, width).")
+    h, w = int(canvas_size[0]), int(canvas_size[1])
+    return np.zeros((h, w, 3), dtype=np.uint8)
+
+
+def _draw_marker(
+    canvas: np.ndarray,
+    x: int, y: int,
+    color: tuple,
+    radius: int,
+    arrow_len: int,
+    angle: Optional[float],
+    show_arrows: bool = False,
+) -> None:
+    """Center dot + circle ring around it, same style for all minutiae types."""
+    # 1-pixel center dot
+    cv2.circle(canvas, (x, y), 1, color, -1, cv2.LINE_AA)
+    # circle ring
+    cv2.circle(canvas, (x, y), radius, color, 1, cv2.LINE_AA)
+
+    if show_arrows and angle is not None:
+        ex = int(x + arrow_len * math.cos(angle))
+        ey = int(y + arrow_len * math.sin(angle))
+        cv2.arrowedLine(canvas, (x, y), (ex, ey), color, 1, cv2.LINE_AA, tipLength=0.30)
+
+
+def _draw_marker_ending(canvas, x, y, radius, arrow_len, angle, show_arrows=False):
+    _draw_marker(canvas, x, y, _COLOR_ENDING, radius, arrow_len, angle, show_arrows)
+
+
+def _draw_marker_bifurcation(canvas, x, y, radius, arrow_len, angle, show_arrows=False):
+    _draw_marker(canvas, x, y, _COLOR_BIFURCATION, radius, arrow_len, angle, show_arrows)
+
+
+def _is_dark_region(canvas: np.ndarray, x: int, y: int, patch: int = 12) -> bool:
+    """True if the neighbourhood around (x, y) is mostly dark."""
+    h, w = canvas.shape[:2]
+    y0, y1 = max(0, y - patch), min(h, y + patch)
+    x0, x1 = max(0, x - patch), min(w, x + patch)
+    region = canvas[y0:y1, x0:x1]
+    return float(np.mean(region)) < 128
+
+
+def _draw_legend(
+    canvas: np.ndarray,
+    n_endings: int,
+    n_bifurcations: int,
+    radius: int,
+) -> None:
+    h, w = canvas.shape[:2]
+    pad = 10
+    box_w, box_h = 210, 70
+    x0, y0 = pad, h - box_h - pad
+
+    # Semi-transparent dark panel
+    overlay = canvas.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), (20, 20, 20), -1)
+    cv2.addWeighted(overlay, 0.65, canvas, 0.35, 0, canvas)
+
+    r = radius
+
+    # Ending row
+    ex, ey = x0 + r + 6, y0 + 18
+    cv2.circle(canvas, (ex, ey), 1,  _COLOR_ENDING, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (ex, ey), r,  _COLOR_ENDING,  1, cv2.LINE_AA)
+    cv2.putText(canvas, f"Ending  ({n_endings})",
+                (ex + r + 8, ey + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, (230, 230, 230), 1, cv2.LINE_AA)
+
+    # Bifurcation row
+    bx, by = x0 + r + 6, y0 + 50
+    cv2.circle(canvas, (bx, by), 1,  _COLOR_BIFURCATION, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (bx, by), r,  _COLOR_BIFURCATION,  1, cv2.LINE_AA)
+    cv2.putText(canvas, f"Bifurcation  ({n_bifurcations})",
+                (bx + r + 8, by + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, (230, 230, 230), 1, cv2.LINE_AA)
+
+
+def draw_minutiae(
+    minutiae: List[dict],
+    background: Optional[np.ndarray] = None,
+    *,
+    canvas_size: Optional[Tuple[int, int]] = None,
+    show_type: str = "both",
+    show_arrows: bool = False,
+    show_legend: bool = True,
+) -> np.ndarray:
+    """
+    Render minutiae with large, human-readable markers on a chosen background.
+
+    Parameters
+    ----------
+    minutiae : list of minutia dicts
+        Output of ``extract_minutiae_crossing_number`` / ``finalize_minutiae``.
+    background : np.ndarray or None
+        What to draw on top of.  Pass any of:
+          - the **original** fingerprint image
+          - the **skeleton** image
+          - a **binary** image
+          - ``None``  →  black canvas (requires *canvas_size*)
+    canvas_size : (height, width)
+        Size of the black canvas when *background* is ``None``.
+        Ignored when a background image is given.
+    radius : int
+        Marker half-size in pixels (default 10).
+    arrow_len : int
+        Length of the orientation arrow in pixels (default 24).
+    show_legend : bool
+        Draw a small legend with counts in the bottom-left corner.
+
+    Returns
+    -------
+    np.ndarray
+        BGR image ready for display or saving.
+
+    Shape legend
+    ------------
+    Filled **circle**   (red-orange) = ridge ending
+    Filled **diamond**  (cyan-blue)  = bifurcation
+    White arrow from centre          = minutia orientation
+
+    Examples
+    --------
+    >>> vis = draw_minutiae(minutiae, background=original_img)
+    >>> vis = draw_minutiae(minutiae, background=skeleton)
+    >>> vis = draw_minutiae(minutiae, canvas_size=skeleton.shape[:2])  # black bg
+
+    Display in a notebook::
+
+        import matplotlib.pyplot as plt, cv2
+        plt.figure(figsize=(8, 8))
+        plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
+        plt.axis('off')
+        plt.show()
+    """
+    _RADIUS    = 5   # fixed marker size — not user-adjustable
+    _ARROW_LEN = 18  # fixed arrow length
+
+    canvas = _make_canvas(background, canvas_size)
+    n_endings = n_bifurcations = 0
+    show_endings      = show_type in ("both", "endings")
+    show_bifurcations = show_type in ("both", "bifurcations")
+
+    for m in minutiae:
+        x = int(round(m["x"]))
+        y = int(round(m["y"]))
+        h, w = canvas.shape[:2]
+        if not (0 <= x < w and 0 <= y < h):
+            continue
+
+        angle = m.get("angle")
+        mtype = m.get("type", "ending")
+
+        if mtype == "ending" and show_endings:
+            _draw_marker_ending(canvas, x, y, _RADIUS, _ARROW_LEN, angle, show_arrows)
+            n_endings += 1
+        elif mtype != "ending" and show_bifurcations:
+            _draw_marker_bifurcation(canvas, x, y, _RADIUS, _ARROW_LEN, angle, show_arrows)
+            n_bifurcations += 1
+
+    if show_legend:
+        _draw_legend(canvas, n_endings, n_bifurcations, _RADIUS)
+
+    return canvas
